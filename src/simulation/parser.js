@@ -5,8 +5,8 @@ export function parseInstruction(text, index) {
 
   const upper = raw.toUpperCase().replace(/\s+/g, ' ')
 
-  // ADD/SUB/AND/OR R1, R2, R3
-  const rType = upper.match(/^(ADD|SUB|AND|OR)\s+(R\d+),\s*(R\d+),\s*(R\d+)$/)
+  // R-type: ADD, SUB, MUL, DIV, AND, OR, NOR, XOR, SLT  →  OP Rd, Rs1, Rs2
+  const rType = upper.match(/^(ADD|SUB|MUL|DIV|AND|OR|NOR|XOR|SLT)\s+(R\d+),\s*(R\d+),\s*(R\d+)$/)
   if (rType) {
     return {
       id: index,
@@ -19,16 +19,17 @@ export function parseInstruction(text, index) {
     }
   }
 
-  // ADDI R1, R2, imm
-  const addi = upper.match(/^ADDI\s+(R\d+),\s*(R\d+),\s*(-?\d+)$/)
-  if (addi) {
+  // I-type immediate: ADDI, SUBI, ANDI, ORI  →  OP Rd, Rs, imm
+  const iType = upper.match(/^(ADDI|SUBI|ANDI|ORI)\s+(R\d+),\s*(R\d+),\s*(-?\d+)$/)
+  if (iType) {
     return {
       id: index,
       raw,
-      op: 'ADDI',
-      dest: addi[1],
-      src1: addi[2],
+      op: iType[1],
+      dest: iType[2],
+      src1: iType[3],
       src2: null,
+      imm: iType[4],
       type: 'I',
     }
   }
@@ -55,8 +56,8 @@ export function parseInstruction(text, index) {
       raw,
       op: 'SW',
       dest: null,
-      src1: sw[3],
-      src2: sw[1],
+      src1: sw[3],   // base-address register
+      src2: sw[1],   // data register (the one being stored)
       type: 'STORE',
     }
   }
@@ -69,7 +70,7 @@ export function parseAll(lines) {
 }
 
 export const EXAMPLES = {
-  'No Dependencies': [
+  'No Hazards': [
     'ADD R1, R2, R3',
     'SUB R4, R5, R6',
     'AND R7, R8, R9',
@@ -80,15 +81,15 @@ export const EXAMPLES = {
     'SUB R4, R1, R5',
     'AND R6, R4, R7',
   ],
-  'Load-Use Hazard': [
+  'Load-Use': [
     'LW R1, 0(R2)',
     'ADD R3, R1, R4',
     'SUB R5, R6, R7',
   ],
-  'Forwarding Demo': [
-    'ADD R1, R2, R3',
-    'SUB R4, R1, R5',
-    'AND R6, R1, R4',
-    'OR R7, R6, R8',
+  'MUL/DIV Chain': [
+    'LW R1, 0(R2)',
+    'MUL R3, R1, R4',
+    'DIV R5, R3, R6',
+    'ADD R7, R5, R8',
   ],
 }

@@ -13,9 +13,10 @@ function getCellInfo(result, instrIdx, cycle) {
   if (!result) return null
   const sched = result.schedule[instrIdx]
   if (!sched) return null
-  if (sched.stallCycles.includes(cycle)) return { type: 'stall' }
+  // STALL entries are included in sched.stages with name === 'STALL'
   const stg = sched.stages.find(s => s.cycle === cycle)
   if (!stg) return null
+  if (stg.name === 'STALL') return { type: 'stall' }
   const fwd = result.forwardingEvents.find(f => f.consumerIdx === instrIdx && f.cycle === cycle)
   return { type: 'stage', label: stg.name, forwarding: !!fwd }
 }
@@ -36,7 +37,6 @@ function Cell({ info, isActive, isCurrent }) {
   const s = STAGE_STYLE[info.label] || { bg: 'bg-gray-100', border: 'border-gray-200', text: 'text-gray-600' }
 
   if (info.forwarding) {
-    // Forwarding: green override — clearly visible
     return (
       <div className={`h-8 w-12 rounded-lg border-2 border-emerald-400 bg-emerald-50 flex flex-col items-center justify-center gap-0
         ${isActive ? 'opacity-100' : 'opacity-30'}
@@ -59,11 +59,17 @@ function Cell({ info, isActive, isCurrent }) {
   )
 }
 
-function TableView({ result, instructions, currentCycle, cycles, label }) {
+function TableView({ result, instructions, currentCycle, label, accent }) {
   const [tip, setTip] = useState(null)
+  if (!result) return null
+
+  const cycles = Array.from({ length: result.totalCycles }, (_, i) => i + 1)
+
   return (
     <div>
-      {label && <p className="text-xs font-semibold text-gray-500 mb-2">{label}</p>}
+      {label && (
+        <p className={`text-xs font-semibold mb-2 ${accent || 'text-gray-500'}`}>{label}</p>
+      )}
       <div className="overflow-x-auto">
         <table className="border-collapse">
           <thead>
@@ -117,7 +123,7 @@ function TableView({ result, instructions, currentCycle, cycles, label }) {
   )
 }
 
-export default function PipelineTable({ result, currentCycle, instructions, showComparison, resultNoFwd }) {
+export default function PipelineTable({ result, currentCycle, instructions, resultNoFwd }) {
   if (!result) {
     return (
       <div className="flex flex-col items-center justify-center py-12 text-gray-300">
@@ -129,8 +135,6 @@ export default function PipelineTable({ result, currentCycle, instructions, show
     )
   }
 
-  const cycles = Array.from({ length: result.totalCycles }, (_, i) => i + 1)
-
   return (
     <div className="space-y-4">
       {/* Legend */}
@@ -139,24 +143,33 @@ export default function PipelineTable({ result, currentCycle, instructions, show
           <div key={name} className={`px-2.5 py-0.5 rounded-lg border text-[10px] font-bold ${s.bg} ${s.border} ${s.text}`}>{name}</div>
         ))}
         <div className="px-2.5 py-0.5 rounded-lg border text-[10px] font-bold bg-red-50 border-red-200 text-red-500">STALL</div>
-        {/* Forwarding example */}
         <div className="flex items-center gap-1 px-2.5 py-0.5 rounded-lg border-2 border-emerald-400 bg-emerald-50 text-[9px] font-bold text-emerald-700">
-          <span>EX</span>
-          <span className="text-emerald-500 text-[7px]">FWD</span>
+          <span>EX</span><span className="text-emerald-500 text-[7px]">FWD</span>
         </div>
         <span className="text-[10px] text-gray-400">← forwarded</span>
       </div>
 
-      {showComparison && resultNoFwd ? (
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
-          <TableView result={result} instructions={instructions} currentCycle={currentCycle} cycles={cycles} label="With Forwarding" />
-          <TableView result={resultNoFwd} instructions={instructions} currentCycle={currentCycle}
-            cycles={Array.from({ length: resultNoFwd.totalCycles }, (_, i) => i + 1)} label="Stall-Only" />
-        </div>
-      ) : (
-        <TableView result={result} instructions={instructions} currentCycle={currentCycle} cycles={cycles} />
-      )}
+      {/* Always show both tables side by side */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+        <TableView
+          result={result}
+          instructions={instructions}
+          currentCycle={currentCycle}
+          label={result.config.forwardingEnabled ? '⚡ With Forwarding' : 'Stall-Only'}
+          accent={result.config.forwardingEnabled ? 'text-emerald-600' : 'text-red-500'}
+        />
+        {resultNoFwd && (
+          <TableView
+            result={resultNoFwd}
+            instructions={instructions}
+            currentCycle={currentCycle}
+            label="🐢 Without Forwarding (Stall-Only)"
+            accent="text-red-500"
+          />
+        )}
+      </div>
 
+      {/* RAW hazard list */}
       {result.rawHazards.length > 0 && (
         <div className="pt-3 border-t border-gray-100 space-y-1.5">
           <p className="text-xs font-semibold text-gray-400 mb-1">RAW Dependencies</p>

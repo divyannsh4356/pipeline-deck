@@ -15,6 +15,7 @@ export default function NaturalLanguageExplainer({ result, instructions }) {
     setExplanation(text); setLoading(false)
   }
 
+  // Typewriter effect
   useEffect(() => {
     if (!explanation) return
     let i = 0; setDisplayed('')
@@ -25,20 +26,23 @@ export default function NaturalLanguageExplainer({ result, instructions }) {
     return () => clearInterval(iv)
   }, [explanation])
 
+  // Auto-generate every time result changes (i.e. every Run)
   useEffect(() => { if (result && instructions.length) generate() }, [result])
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center">
         <span className="text-xs text-gray-400">{usingFallback ? 'Rule-based analysis' : 'Mistral-7B via Hugging Face'}</span>
-        <button onClick={generate} disabled={!result || loading}
-          className="text-xs px-3 py-1.5 rounded-xl bg-gray-100 border border-gray-200 text-gray-600 hover:bg-gray-200 transition-colors disabled:opacity-40 font-medium">
-          {loading ? '…' : '↺ Regenerate'}
-        </button>
+        {loading && (
+          <span className="ml-auto flex items-center gap-1.5 text-xs text-indigo-500">
+            <span className="w-3 h-3 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin inline-block" />
+            Analyzing…
+          </span>
+        )}
       </div>
       <div className="bg-gray-50 border border-gray-100 rounded-2xl p-4 min-h-[80px]">
         {loading
-          ? <div className="flex items-center gap-2 text-gray-400 text-sm"><div className="w-3.5 h-3.5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />Analyzing…</div>
+          ? <div className="flex items-center gap-2 text-gray-400 text-sm"><div className="w-3.5 h-3.5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />Analyzing pipeline…</div>
           : displayed
           ? <p className="text-gray-700 text-sm leading-relaxed">{displayed}<span className="animate-pulse text-indigo-500 ml-0.5">|</span></p>
           : <p className="text-gray-300 text-sm italic">Run a simulation to generate the debrief.</p>

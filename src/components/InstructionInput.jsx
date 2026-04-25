@@ -4,8 +4,12 @@ import { parseInstruction, EXAMPLES } from '../simulation/parser.js'
 const TEMPLATES = {
   ADD:  'ADD R1, R2, R3',
   SUB:  'SUB R4, R1, R5',
+  MUL:  'MUL R1, R2, R3',
+  DIV:  'DIV R4, R1, R5',
   AND:  'AND R1, R2, R3',
   OR:   'OR  R1, R2, R3',
+  NOR:  'NOR R1, R2, R3',
+  XOR:  'XOR R1, R2, R3',
   ADDI: 'ADDI R1, R2, 5',
   LW:   'LW R1, 0(R2)',
   SW:   'SW R1, 0(R2)',
@@ -14,9 +18,13 @@ const TEMPLATES = {
 const OP_COLORS = {
   ADD:  'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100',
   SUB:  'bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100',
+  MUL:  'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100',
+  DIV:  'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100',
   AND:  'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100',
   OR:   'bg-teal-50 text-teal-700 border-teal-200 hover:bg-teal-100',
-  ADDI: 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100',
+  NOR:  'bg-cyan-50 text-cyan-700 border-cyan-200 hover:bg-cyan-100',
+  XOR:  'bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-100',
+  ADDI: 'bg-lime-50 text-lime-700 border-lime-200 hover:bg-lime-100',
   LW:   'bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100',
   SW:   'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100',
 }
@@ -41,17 +49,28 @@ export default function InstructionInput({ onInstructionsChange, onRun }) {
 
   const validCount = errors.filter(e => !e).length
 
+  // Group ops into rows for cleaner layout
+  const OP_GROUPS = [
+    ['ADD', 'SUB', 'MUL', 'DIV'],
+    ['AND', 'OR', 'NOR', 'XOR'],
+    ['ADDI', 'LW', 'SW'],
+  ]
+
   return (
     <div className="space-y-3">
       {/* Operation buttons */}
       <div>
         <p className="text-xs text-gray-400 mb-2 font-medium">Add instruction</p>
-        <div className="flex flex-wrap gap-1.5">
-          {Object.keys(TEMPLATES).map(op => (
-            <button key={op} onClick={() => addOp(op)} disabled={lines.length >= 10}
-              className={`px-3 py-1 text-xs font-semibold rounded-full border transition-colors disabled:opacity-30 ${OP_COLORS[op]}`}>
-              {op}
-            </button>
+        <div className="space-y-1.5">
+          {OP_GROUPS.map((group, gi) => (
+            <div key={gi} className="flex flex-wrap gap-1.5">
+              {group.map(op => (
+                <button key={op} onClick={() => addOp(op)} disabled={lines.length >= 10}
+                  className={`px-3 py-1 text-xs font-semibold rounded-full border transition-colors disabled:opacity-30 ${OP_COLORS[op]}`}>
+                  {op}
+                </button>
+              ))}
+            </div>
           ))}
         </div>
       </div>

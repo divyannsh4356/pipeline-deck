@@ -38,7 +38,6 @@ function Card({ title, subtitle, children, className = '', id, action, noPad = f
 export default function App() {
   const [launched, setLaunched] = useState(false)
   const [validInstructions, setValidInstructions] = useState([])
-  const [showComparison, setShowComparison] = useState(false)
   const [resultNoFwd, setResultNoFwd] = useState(null)
 
   const {
@@ -62,6 +61,7 @@ export default function App() {
     const res = run(validInstructions, config)
     if (res) {
       addEntry(validInstructions, res)
+      // Always compute no-forwarding result for side-by-side comparison
       setResultNoFwd(simulate(validInstructions, { ...config, forwardingEnabled: false }))
     }
   }
@@ -134,7 +134,6 @@ export default function App() {
             <main className="max-w-screen-xl mx-auto px-6 py-6 space-y-4">
 
               {/* ── Row 1: Instructions + DAG + Config ── */}
-              {/* DAG gets ~280px, config gets ~180px, instructions gets the rest */}
               <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px_180px] gap-4 items-start">
                 <Card title="Instructions" subtitle="Click an operation to add, then edit values">
                   <InstructionInput onInstructionsChange={handleInstructionsChange} onRun={handleRun} />
@@ -185,28 +184,20 @@ export default function App() {
                     />
                   </div>
 
-                  {/* Table */}
+                  {/* Table — always shows both forwarding and stall-only side by side */}
                   <div id="pipeline-table" className="px-5 pt-4 pb-4 border-b border-gray-100">
-                    <div className="flex items-center justify-between mb-3">
-                      <div>
-                        <p className="text-sm font-semibold text-gray-800">Pipeline Execution</p>
-                        <p className="text-[11px] text-gray-400 mt-0.5">
-                          {result.totalCycles} cycles · CPI {(result.totalCycles / validInstructions.length).toFixed(2)} · {result.stallsTotal} stall{result.stallsTotal !== 1 ? 's' : ''}
-                          {result.stallsSaved > 0 && <span className="text-emerald-600"> · {result.stallsSaved} saved by forwarding</span>}
-                        </p>
-                      </div>
-                      <button onClick={() => setShowComparison(s => !s)}
-                        className={`text-xs px-3 py-1.5 rounded-xl border font-medium transition-colors ${
-                          showComparison ? 'bg-amber-50 border-amber-300 text-amber-700' : 'bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100'
-                        }`}>
-                        {showComparison ? '✕ Close' : '⇔ Compare modes'}
-                      </button>
+                    <div className="mb-3">
+                      <p className="text-sm font-semibold text-gray-800">Pipeline Execution</p>
+                      <p className="text-[11px] text-gray-400 mt-0.5">
+                        {result.totalCycles} cycles (fwd) · CPI {(result.totalCycles / validInstructions.length).toFixed(2)} · {result.stallsTotal} stall{result.stallsTotal !== 1 ? 's' : ''}
+                        {result.stallsSaved > 0 && <span className="text-emerald-600"> · {result.stallsSaved} saved by forwarding</span>}
+                        {resultNoFwd && <span className="text-gray-400"> · {resultNoFwd.totalCycles} cycles (no-fwd)</span>}
+                      </p>
                     </div>
                     <PipelineTable
                       result={result}
                       currentCycle={currentCycle}
                       instructions={validInstructions}
-                      showComparison={showComparison}
                       resultNoFwd={resultNoFwd}
                     />
                   </div>
@@ -243,7 +234,7 @@ export default function App() {
               {/* Debrief + History */}
               {result && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  <Card title="Analysis Debrief" subtitle="Plain-English explanation">
+                  <Card title="Analysis Debrief" subtitle="Plain-English explanation · auto-generated on Run">
                     <NaturalLanguageExplainer result={result} instructions={validInstructions} />
                   </Card>
                   <Card title="Run History" subtitle="Up to 5 previous runs">
