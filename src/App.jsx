@@ -45,6 +45,7 @@ export default function App() {
     instructions, setInstructions,
     result, currentCycle,
     isRunning, speed, setSpeed,
+    maxCycles, setMaxCycles,
     run, stepForward, stepBackward,
     reset, startAutoRun, pause,
   } = useSimulation()
@@ -62,7 +63,10 @@ export default function App() {
     if (res) {
       addEntry(validInstructions, res)
       // Always compute no-forwarding result for side-by-side comparison
-      setResultNoFwd(simulate(validInstructions, { ...config, forwardingEnabled: false }))
+      const noFwd = simulate(validInstructions, { ...config, forwardingEnabled: false })
+      setResultNoFwd(noFwd)
+      // Auto-run must cover the longer of the two tables
+      setMaxCycles(Math.max(res.totalCycles, noFwd?.totalCycles || 0))
     }
   }
 
@@ -174,7 +178,7 @@ export default function App() {
                   <div className="px-5 py-3 border-b border-gray-100">
                     <SimulationControls
                       currentCycle={currentCycle}
-                      totalCycles={result.totalCycles}
+                      totalCycles={maxCycles}
                       isRunning={isRunning}
                       onStepForward={stepForward}
                       onStepBackward={stepBackward}

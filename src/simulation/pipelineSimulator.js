@@ -1,37 +1,31 @@
 import { detectRAWHazards } from './hazardDetector.js'
 
 /**
- * Simulate the pipeline and return a complete execution schedule.
+ * Pipeline simulator — correct stall computation with natural-sequential IF display.
  *
- * Model (matches standard textbook / PDF test-case representation):
- *   - ifCycle[i]    = the cycle when instruction i is in the IF stage
- *   - stallCount[i] = stall (bubble) cycles inserted BETWEEN IF and ID for instruction i
- *   - ifCycle[i]    = ifCycle[i-1] + 1 + stallCount[i-1]   (pipeline frozen while i-1 stalls)
+ * COMPUTATION MODEL (frozen-pipeline — determines correct ID/EX/MEM/WB timing):
+ *   ifCycles[i]    = cycle when instruction i actually enters the pipeline
+ *   stallCounts[i] = stalls caused by instruction i's own RAW dependency
+ *   ifCycles[i]    = ifCycles[i-1] + 1 + stallCounts[i-1]
  *
- * Stage cycles for instruction i (5-stage example):
- *   IF  → ifCycle[i]
- *   STALL × stallCount[i]  (cycles ifCycle[i]+1 … ifCycle[i]+stallCount[i])
- *   ID  → ifCycle[i] + stallCount[i] + 1
- *   EX  → ifCycle[i] + stallCount[i] + 2
- *   MEM → ifCycle[i] + stallCount[i] + 3
- *   WB  → ifCycle[i] + stallCount[i] + 4
+ * DISPLAY MODEL (what the table shows):
+ *   IF is always shown at the natural sequential position: naturalIF[i] = i + 1
+ *   Stall bubbles fill every cycle from naturalIF[i]+1 up to (but not including) the
+ *   actual ID cycle — this includes both the instruction's own stalls AND any extra
+ *   cycles the fetch stage was frozen due to upstream instructions stalling.
+ *   ID / EX / MEM / WB are shown at exactly the cycles computed by the model above.
  *
- * Stall formulae (derived from and verified against all PDF test cases):
+ * This gives the intuitive "instruction is fetched, then stalls until data ready" view
+ * while still computing the correct timing for all stages.
  *
- *   No forwarding, 5-stage:  max(0, prodWB + 1 − consID_natural)
- *     = max(0, (icp + sp + 4) + 1 − (icc + 1))
- *     = max(0, icp + sp + 4 − icc)
+ * Stall formulae (verified against all PDF test cases):
  *
- *   No forwarding, 4-stage:  same but WB = icp + sp + 3
- *     = max(0, icp + sp + 3 − icc)
+ *   No forwarding, 5-stage:  max(0, icp + sp + 4 − icc)
+ *   No forwarding, 4-stage:  max(0, icp + sp + 3 − icc)
+ *   Forwarding, arithmetic:  max(0, icp + sp + 1 − icc)   [EX→EX]
+ *   Forwarding, LW:          max(0, icp + sp + 2 − icc)   [MEM→EX, 1 unavoidable stall]
  *
- *   Forwarding, arithmetic:  EX→EX — consEX must be strictly after prodEX
- *     = max(0, (icp + sp + 2) + 1 − (icc + 2))
- *     = max(0, icp + sp + 1 − icc)
- *
- *   Forwarding, LW (load-use): MEM→EX — consEX must be strictly after prodMEM
- *     = max(0, (icp + sp + 3) + 1 − (icc + 2))
- *     = max(0, icp + sp + 2 − icc)
+ *   where icp = ifCycles[producer], sp = stallCounts[producer], icc = ifCycles[consumer]
  */
 export function simulate(instructions, config) {
   if (!instructions || instructions.length === 0) return null
@@ -39,7 +33,6 @@ export function simulate(instructions, config) {
   const { pipelineStages, forwardingEnabled } = config
   const is5Stage = pipelineStages !== 4
 
-  // Stage names after IF (stalls slot between IF and these)
   const stageNamesAfterIF = is5Stage
     ? ['ID', 'EX', 'MEM', 'WB']
     : ['ID', 'EX', 'MEM/WB']
@@ -51,22 +44,21 @@ export function simulate(instructions, config) {
   const n = instructions.length
   const rawHazards = detectRAWHazards(instructions)
 
-  const ifCycles    = new Array(n).fill(0)
-  const stallCounts = new Array(n).fill(0)
+  // ── Step 1: compute actual IF cycles and stall counts ──────────────────────
+  const ifCycles    = new Array(n).fill(0)  // actual pipeline IF cycle
+  const stallCounts = new Array(n).fill(0)  // stalls from THIS instruction's own dependency
 
   ifCycles[0] = 1
 
   for (let i = 0; i < n; i++) {
-    // Set IF cycle based on previous instruction's release
     if (i > 0) {
       ifCycles[i] = ifCycles[i - 1] + 1 + stallCounts[i - 1]
     }
 
-    // Compute stalls needed for instruction i (max over all RAW producers)
     stallCounts[i] = 0
     for (const hz of rawHazards) {
       if (hz.consumerIdx !== i) continue
-      const p   = hz.producerIdx   // always < i
+      const p   = hz.producerIdx
       const icp = ifCycles[p]
       const sp  = stallCounts[p]
       const icc = ifCycles[i]
@@ -74,14 +66,11 @@ export function simulate(instructions, config) {
       let needed = 0
       if (forwardingEnabled) {
         if (instructions[p].op === 'LW') {
-          // load-use: MEM→EX forwarding, 1 unavoidable stall when adjacent
-          needed = Math.max(0, icp + sp + 2 - icc)
+          needed = Math.max(0, icp + sp + 2 - icc)   // MEM→EX, load-use
         } else {
-          // arithmetic: EX→EX forwarding
-          needed = Math.max(0, icp + sp + 1 - icc)
+          needed = Math.max(0, icp + sp + 1 - icc)   // EX→EX
         }
       } else {
-        // No forwarding: wait for WB to complete
         const wbOffset = is5Stage ? 4 : 3
         needed = Math.max(0, icp + sp + wbOffset - icc)
       }
@@ -90,29 +79,44 @@ export function simulate(instructions, config) {
     }
   }
 
-  // Build schedule — stages array includes explicit STALL entries
+  // ── Step 2: build schedule with natural-sequential IF display ───────────────
+  // IF is always at i+1 (natural fetch order).
+  // Stall bubbles fill from naturalIF+1 to actualID-1 (includes both own stalls
+  // AND cycles the fetch stage was frozen by upstream stalls).
   const schedule = instructions.map((instr, i) => {
     const ifc = ifCycles[i]
     const sc  = stallCounts[i]
 
-    const stages = [{ name: 'IF', cycle: ifc }]
-    for (let s = 0; s < sc; s++) {
-      stages.push({ name: 'STALL', cycle: ifc + 1 + s })
+    const naturalIF = i + 1                      // displayed IF cycle (always sequential)
+    const actualID  = ifc + sc + 1               // real ID cycle (correct timing)
+    const displayStalls = actualID - naturalIF - 1  // bubbles shown: naturalIF+1 … actualID-1
+
+    const stages = [{ name: 'IF', cycle: naturalIF }]
+    for (let s = 0; s < displayStalls; s++) {
+      stages.push({ name: 'STALL', cycle: naturalIF + 1 + s })
     }
     stageNamesAfterIF.forEach((name, idx) => {
-      stages.push({ name, cycle: ifc + sc + 1 + idx })
+      stages.push({ name, cycle: actualID + idx })
     })
 
-    return { instrIdx: i, instr, ifCycle: ifc, stallCount: sc, stages }
+    return {
+      instrIdx: i,
+      instr,
+      ifCycle: naturalIF,
+      stallCount: displayStalls,    // total bubbles visible in this row
+      computedStall: sc,            // stalls from own dependency (used for stats)
+      stages,
+    }
   })
 
-  // Total cycles = last stage of last instruction
-  const lastSched = schedule[n - 1]
+  // ── Step 3: derive totals ──────────────────────────────────────────────────
+  const lastSched   = schedule[n - 1]
   const totalCycles = lastSched.stages[lastSched.stages.length - 1].cycle
 
+  // stallsTotal = sum of each instruction's own dependency stalls (the meaningful metric)
   const stallsTotal = stallCounts.reduce((a, b) => a + b, 0)
 
-  // Forwarding events — mark consumer's EX stage when data is forwarded
+  // ── Step 4: forwarding events ──────────────────────────────────────────────
   const forwardingEvents = []
   if (forwardingEnabled) {
     for (const hz of rawHazards) {
@@ -123,14 +127,13 @@ export function simulate(instructions, config) {
       const icc = ifCycles[c]
       const sc  = stallCounts[c]
 
-      const prodExCycle  = icp + sp + 2
-      const consExCycle  = icc + sc + 2
+      const prodExCycle = icp + sp + 2
+      const consExCycle = icc + sc + 2
 
       if (is5Stage) {
         if (instructions[p].op === 'LW') {
           const prodMemCycle = icp + sp + 3
-          const fwdGap = consExCycle - prodMemCycle
-          if (fwdGap >= 1) {
+          if (consExCycle > prodMemCycle) {
             forwardingEvents.push({
               producerIdx: p, consumerIdx: c, register: hz.register,
               fromStage: 'MEM', toStage: 'EX', cycle: consExCycle,
@@ -151,29 +154,31 @@ export function simulate(instructions, config) {
           }
         }
       } else {
-        // 4-stage: similar logic
-        const exGap = consExCycle - prodExCycle
+        // 4-stage
         if (instructions[p].op === 'LW') {
           const prodMWBCycle = icp + sp + 3
-          if (consExCycle - prodMWBCycle >= 1) {
+          if (consExCycle > prodMWBCycle) {
             forwardingEvents.push({
               producerIdx: p, consumerIdx: c, register: hz.register,
               fromStage: 'MEM/WB', toStage: 'EX', cycle: consExCycle,
             })
           }
-        } else if (exGap >= 1 && exGap <= 2) {
-          forwardingEvents.push({
-            producerIdx: p, consumerIdx: c, register: hz.register,
-            fromStage: exGap === 1 ? 'EX' : 'MEM/WB', toStage: 'EX', cycle: consExCycle,
-          })
+        } else {
+          const exGap = consExCycle - prodExCycle
+          if (exGap >= 1 && exGap <= 2) {
+            forwardingEvents.push({
+              producerIdx: p, consumerIdx: c, register: hz.register,
+              fromStage: exGap === 1 ? 'EX' : 'MEM/WB', toStage: 'EX', cycle: consExCycle,
+            })
+          }
         }
       }
     }
   }
 
-  // Stalls saved = no-forwarding stalls minus forwarding stalls
+  // stallsSaved = cycle-count difference (clean and intuitive)
   const stallsSaved = forwardingEnabled
-    ? Math.max(0, simulate(instructions, { ...config, forwardingEnabled: false }).stallsTotal - stallsTotal)
+    ? Math.max(0, simulate(instructions, { ...config, forwardingEnabled: false }).totalCycles - totalCycles)
     : 0
 
   return {

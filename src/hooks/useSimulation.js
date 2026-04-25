@@ -14,6 +14,8 @@ export function useSimulation() {
   const [currentCycle, setCurrentCycle] = useState(0)
   const [isRunning, setIsRunning] = useState(false)
   const [speed, setSpeed] = useState(1)
+  // maxCycles = max(fwdCycles, noFwdCycles) — set by App after computing both results
+  const [maxCycles, setMaxCycles] = useState(0)
   const timerRef = useRef(null)
 
   const run = useCallback((instrs, cfg) => {
@@ -22,6 +24,7 @@ export function useSimulation() {
     if (!activeInstrs.length) return
     const res = simulate(activeInstrs, activeCfg)
     setResult(res)
+    setMaxCycles(res.totalCycles) // will be bumped by App once noFwd is computed
     setCurrentCycle(0)
     setIsRunning(false)
     return res
@@ -29,8 +32,8 @@ export function useSimulation() {
 
   const stepForward = useCallback(() => {
     if (!result) return
-    setCurrentCycle(c => Math.min(c + 1, result.totalCycles))
-  }, [result])
+    setCurrentCycle(c => Math.min(c + 1, maxCycles))
+  }, [result, maxCycles])
 
   const stepBackward = useCallback(() => {
     setCurrentCycle(c => Math.max(c - 1, 0))
@@ -55,7 +58,7 @@ export function useSimulation() {
     if (isRunning && result) {
       timerRef.current = setInterval(() => {
         setCurrentCycle(c => {
-          if (c >= result.totalCycles) {
+          if (c >= maxCycles) {
             setIsRunning(false)
             return c
           }
@@ -66,7 +69,7 @@ export function useSimulation() {
       if (timerRef.current) clearInterval(timerRef.current)
     }
     return () => { if (timerRef.current) clearInterval(timerRef.current) }
-  }, [isRunning, result, speed])
+  }, [isRunning, result, speed, maxCycles])
 
   return {
     config,
@@ -80,6 +83,8 @@ export function useSimulation() {
     isRunning,
     speed,
     setSpeed,
+    maxCycles,
+    setMaxCycles,
     run,
     stepForward,
     stepBackward,
