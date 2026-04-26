@@ -22,18 +22,8 @@ import { detectRAWHazards } from './hazardDetector.js'
  *
  *   No forwarding, 5-stage:  max(0, icp + sp + 4 − icc)
  *   No forwarding, 4-stage:  max(0, icp + sp + 3 − icc)
- *   Forwarding, arithmetic:  max(0, icp + sp + 1 − icc)   [EX→EX, 0 stalls if adjacent]
- *   Forwarding, LW 5-stage:  max(0, icp + sp + 3 − icc)   [WB→ID write-before-read, 2 stalls if adjacent]
- *   Forwarding, LW 4-stage:  max(0, icp + sp + 2 − icc)   [MEM/WB→ID write-before-read, 1 stall if adjacent]
- *
- *   GATE model rationale for 5-stage LW:
- *   The loaded value is NOT available via any bypass path during MEM.
- *   The consumer's ID stage reads the register file — but MEM and ID cannot
- *   overlap because the register file still holds the stale value at that point.
- *   The consumer must wait until the producer's WB stage, then both WB (write)
- *   and ID (read) happen in the same cycle via write-before-read convention.
- *   EX and ID CAN overlap because EX→EX forwarding delivers the correct value
- *   at the consumer's EX stage, bypassing the stale register-file read.
+ *   Forwarding, arithmetic:  max(0, icp + sp + 1 − icc)   [EX→EX]
+ *   Forwarding, LW:          max(0, icp + sp + 2 − icc)   [MEM→EX, 1 unavoidable stall]
  *
  *   where icp = ifCycles[producer], sp = stallCounts[producer], icc = ifCycles[consumer]
  */
@@ -76,9 +66,7 @@ export function simulate(instructions, config) {
       let needed = 0
       if (forwardingEnabled) {
         if (instructions[p].op === 'LW') {
-          needed = is5Stage
-            ? Math.max(0, icp + sp + 3 - icc)   // 5-stage: WB→ID write-before-read (2 stalls if adjacent)
-            : Math.max(0, icp + sp + 2 - icc)   // 4-stage: MEM/WB→ID write-before-read (1 stall if adjacent)
+          needed = Math.max(0, icp + sp + 2 - icc)   // MEM→EX, load-use
         } else {
           needed = Math.max(0, icp + sp + 1 - icc)   // EX→EX
         }
@@ -144,12 +132,11 @@ export function simulate(instructions, config) {
 
       if (is5Stage) {
         if (instructions[p].op === 'LW') {
-          const prodWbCycle  = icp + sp + 4
-          const consIdCycle  = icc + sc + 1
-          if (consIdCycle === prodWbCycle) {
+          const prodMemCycle = icp + sp + 3
+          if (consExCycle > prodMemCycle) {
             forwardingEvents.push({
               producerIdx: p, consumerIdx: c, register: hz.register,
-              fromStage: 'WB', toStage: 'ID', cycle: consIdCycle,
+              fromStage: 'MEM', toStage: 'EX', cycle: consExCycle,
             })
           }
         } else {
