@@ -10,10 +10,11 @@ import { detectRAWHazards } from './hazardDetector.js'
  *
  * DISPLAY MODEL (what the table shows):
  *   IF is always shown at the natural sequential position: naturalIF[i] = i + 1
- *   Stall bubbles fill every cycle from naturalIF[i]+1 up to (but not including) the
- *   actual ID cycle — this includes both the instruction's own stalls AND any extra
- *   cycles the fetch stage was frozen due to upstream instructions stalling.
- *   ID / EX / MEM / WB are shown at exactly the cycles computed by the model above.
+ *   ID is always shown one cycle after IF:                 naturalID[i] = i + 2
+ *   Stall bubbles fill every cycle from naturalID[i]+1 up to (but not including) the
+ *   actual EX cycle — stall appears AFTER ID (where hazard is detected), matching
+ *   the lecture slide model. This covers both own stalls and upstream pipeline freezes.
+ *   EX / MEM / WB are shown at exactly the cycles computed by the model above.
  *
  * This gives the intuitive "instruction is fetched, then stalls until data ready" view
  * while still computing the correct timing for all stages.
@@ -79,24 +80,28 @@ export function simulate(instructions, config) {
     }
   }
 
-  // ── Step 2: build schedule with natural-sequential IF display ───────────────
-  // IF is always at i+1 (natural fetch order).
-  // Stall bubbles fill from naturalIF+1 to actualID-1 (includes both own stalls
-  // AND cycles the fetch stage was frozen by upstream stalls).
+  // ── Step 2: build schedule with natural-sequential IF/ID display ────────────
+  // IF is always at i+1, ID always at i+2 (natural fetch order, no pre-ID stalls).
+  // Stall bubbles fill from naturalID+1 to actualEX-1 — stall appears AFTER ID,
+  // where the hazard is detected (matches lecture slide model).
   const schedule = instructions.map((instr, i) => {
     const ifc = ifCycles[i]
     const sc  = stallCounts[i]
 
-    const naturalIF = i + 1                      // displayed IF cycle (always sequential)
-    const actualID  = ifc + sc + 1               // real ID cycle (correct timing)
-    const displayStalls = actualID - naturalIF - 1  // bubbles shown: naturalIF+1 … actualID-1
+    const naturalIF  = i + 1                         // displayed IF cycle (always sequential)
+    const naturalID  = i + 2                         // ID always one cycle after IF
+    const actualEX   = ifc + sc + 2                  // real EX cycle (correct timing)
+    const displayStalls = actualEX - naturalID - 1   // bubbles shown: naturalID+1 … actualEX-1
 
-    const stages = [{ name: 'IF', cycle: naturalIF }]
+    const stages = [
+      { name: 'IF', cycle: naturalIF },
+      { name: 'ID', cycle: naturalID },
+    ]
     for (let s = 0; s < displayStalls; s++) {
-      stages.push({ name: 'STALL', cycle: naturalIF + 1 + s })
+      stages.push({ name: 'STALL', cycle: naturalID + 1 + s })
     }
-    stageNamesAfterIF.forEach((name, idx) => {
-      stages.push({ name, cycle: actualID + idx })
+    stageNamesAfterIF.slice(1).forEach((name, idx) => {
+      stages.push({ name, cycle: actualEX + idx })
     })
 
     return {
